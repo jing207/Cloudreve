@@ -17,11 +17,13 @@ import (
 )
 
 var (
-	ErrAuthFailed        = serializer.NewError(serializer.CodeNoPermissionErr, "鉴权失败", nil)
+	ErrAuthFailed        = serializer.NewError(serializer.CodeInvalidSign, "invalid sign", nil)
 	ErrAuthHeaderMissing = serializer.NewError(serializer.CodeNoPermissionErr, "authorization header is missing", nil)
 	ErrExpiresMissing    = serializer.NewError(serializer.CodeNoPermissionErr, "expire timestamp is missing", nil)
-	ErrExpired           = serializer.NewError(serializer.CodeSignExpired, "签名已过期", nil)
+	ErrExpired           = serializer.NewError(serializer.CodeSignExpired, "signature expired", nil)
 )
+
+const CrHeaderPrefix = "X-Cr-"
 
 // General 通用的认证接口
 var General Auth
@@ -64,12 +66,12 @@ func CheckRequest(instance Auth, r *http.Request) error {
 	return instance.Check(getSignContent(r), sign[0])
 }
 
-// getSignContent 签名请求 path、正文、以`X-`开头的 Header. 如果 Header 中包含 `X-Policy`，
+// getSignContent 签名请求 path、正文、以`X-`开头的 Header. 如果请求 path 为从机上传 API，
 // 则不对正文签名。返回待签名/验证的字符串
 func getSignContent(r *http.Request) (rawSignString string) {
 	// 读取所有body正文
 	var body = []byte{}
-	if _, ok := r.Header["X-Cr-Policy"]; !ok {
+	if !strings.Contains(r.URL.Path, "/api/v3/slave/upload/") {
 		if r.Body != nil {
 			body, _ = ioutil.ReadAll(r.Body)
 			_ = r.Body.Close()
@@ -80,7 +82,7 @@ func getSignContent(r *http.Request) (rawSignString string) {
 	// 决定要签名的header
 	var signedHeader []string
 	for k, _ := range r.Header {
-		if strings.HasPrefix(k, "X-Cr-") && k != "X-Cr-Filename" {
+		if strings.HasPrefix(k, CrHeaderPrefix) && k != CrHeaderPrefix+"Filename" {
 			signedHeader = append(signedHeader, fmt.Sprintf("%s=%s", k, r.Header.Get(k)))
 		}
 	}
@@ -134,7 +136,7 @@ func Init() {
 	} else {
 		secretKey = conf.SlaveConfig.Secret
 		if secretKey == "" {
-			util.Log().Panic("未指定 SlaveSecret，请前往配置文件中指定")
+			util.Log().Panic("SlaveSecret is not set, please specify it in config file.")
 		}
 	}
 	General = HMACAuth{
